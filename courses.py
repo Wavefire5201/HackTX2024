@@ -1,135 +1,139 @@
 import os
 import sys
 import re
-from Iris import Iris
-import iris
 
-# Canvas API
 import canvasapi
 from canvasapi.course import Course
-from canvasapi.exceptions import Unauthorized, ResourceDoesNotExist, Forbidden
-from canvasapi.file import File
 from canvasapi.module import Module, ModuleItem
+from canvasapi.file import File
+from canvasapi.page import Page
+from canvasapi.exceptions import Unauthorized, ResourceDoesNotExist, Forbidden
 from pathvalidate import sanitize_filename
-from dotenv import load_dotenv
-
-load_dotenv()
-
-CANVAS_API_KEY = os.getenv("CANVAS_API_KEY")
-OLLAMA_HOST = os.getenv("OLLAMA_HOST")
-
-iris = Iris(database=True).connect()
-cursor = iris.cursor()
-
-user_table = "Users.Profile"
-user_df = (
-    "(UserID VARCHAR(50) PRIMARY KEY, Name VARCHAR(100), CanvasAPIKey VARCHAR(255))"
-)
-course_table = "Users.Course"
-course_df = """
-(
-        CourseID IDENTITY PRIMARY KEY,
-        UserID VARCHAR(50),
-        CourseName VARCHAR(100),
-        VectorData VARBINARY(32000),
-        Metadata VARCHAR(4000),
-        FOREIGN KEY (UserID) REFERENCES Users.Profile(UserID)
-    )
-"""
 
 
-def create_schema():
-    """Create the database schema."""
-    cursor.execute(f"CREATE TABLE {user_table} {user_df}")
-    cursor.execute(f"CREATE TABLE {course_table} {course_df}")
-
-
-def add_user(user_id: str, name: str, api_key: str) -> None:
-    """Add a new user to the database."""
-    print(
-        f"INSERT INTO {user_table} (UserID, Name, CanvasAPIKey) VALUES ('{user_id}', '{name}', '{api_key}')"
-    )
-    cursor.execute(
-        f"INSERT INTO {user_table} (UserID, Name, CanvasAPIKey) VALUES (?, ?, ?)",
-        (user_id, name, api_key),
-    )
-
-
-def add_course(
-    user_id: str, course_name: str, vector_data: bytes, metadata: str
-) -> None:
-    """Add a course with vector data for a user."""
-    print(
-        f"INSERT INTO {course_table} (UserID, CourseName, VectorData, Metadata) VALUES ('{user_id}', '{course_name}', ?, ?)"
-    )
-    cursor.execute(
-        f"INSERT INTO {course_table} (UserID, CourseName, VectorData, Metadata) VALUES (?, ?, ?, ?)",
-        (user_id, course_name, vector_data, metadata),
-    )
-
-
-def get_user_courses(user_id: str) -> list[dict]:
-    """Retrieve all courses for a user."""
-    result = iris.query(
-        "SELECT CourseID, CourseName, VectorData, Metadata FROM Users.Course WHERE UserID = ?",
-        user_id,
-    )
-
-    courses = []
-    for row in result:
-        courses.append(
-            {
-                "course_id": row[0],
-                "course_name": row[1],
-                "vector_data": row[2],
-                "metadata": row[3],
-            }
+class CourseDownloader:
+    def __init__(self):
+        self.DOWNLOAD_PATH = "./files"
+        self.CANVAS_API_KEY = os.getenv("CANVAS_API_KEY")
+        self.CANVAS_HOST = os.getenv("CANVAS_HOST")
+        self.canvas = canvasapi.Canvas(
+            "https://utexas.instructure.com", self.CANVAS_API_KEY
         )
-    return courses
+        self.courses = self.canvas.get_courses()
+        self.files_downloaded = set()
 
+    def download_all(self):
+        for course in self.courses:
+            self.download_course(course)
 
-def update_course_vector(course_id: int, vector_data: bytes, metadata: str) -> None:
-    """Update vector data and metadata for a course."""
-    print(
-        f"UPDATE {course_table} SET VectorData = ?, Metadata = ? WHERE CourseID = {course_id}"
-    )
-    cursor.execute(
-        f"UPDATE {course_table} SET VectorData = ?, Metadata = ? WHERE CourseID = ?",
-        (vector_data, metadata, course_id),
-    )
+    def download_course(self, course: Course):
+        for module in course.get_modules():
+            self.download_module(module)
 
+    def download_module(self, module: Module):
+        for item in module.get_module_items():
+            self.download_item(item)
 
-def delete_user(user_id: str) -> None:
-    """Delete a user and all their associated courses."""
-    print(f"DELETE FROM {course_table} WHERE UserID = '{user_id}'")
-    cursor.execute(
-        f"DELETE FROM {course_table} WHERE UserID = ?; DELETE FROM {user_table} WHERE UserID = ?;",
-        (user_id, user_id),
-    )
+    def download_item(self, item: ModuleItem):
+        print(f"{item.type} | {item}")
+        path = f"{self.DOWNLOAD_PATH}/{item.course_id}/{item.module_id}/"
+        # print(path)
+        item1 = {key: value for key, value in item.__dict__.items()}
+        # print(item1)
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        course: Course = self.canvas.get_course(item.course_id)
+        if item.type == "File":
+            print(item)
+            print(item.content_id)
+            print(item.id)
+            self.download_file(course, item.content_id, path)
+        elif item.type == "Page":
+            page: Page = course.get_page(item.page_url)
+            with open(
+                f"{path}{item.id}.html",
+                "w",
+                encoding="utf-8",
+            ) as f:
+                try:
+                    f.write(page.body or "")
+                except Exception as e:
+                    print(e)
+            files = self.extract_files(page.body or "")
+            for file_id in files:
+                self.download_file(course, file_id, path)
+
+        elif item.type == "Assignment":
+            assignment = course.get_assignment(item.content_id)
+            with open(
+                f"{path}{item.id}.html",
+                "w",
+                encoding="utf-8",
+            ) as f:
+                try:
+                    f.write(assignment.description or "")
+                except Exception as e:
+                    print(e)
+            files = self.extract_files(assignment.description or "")
+            for file_id in files:
+                self.download_file(course, file_id, path)
+
+    def download_file(self, course: Course, content_id: int, path: str):
+        if content_id in self.files_downloaded:
+            return
+        try:
+            file: File = course.get_file(content_id)
+            item1 = {key: value for key, value in file.__dict__.items()}
+            print(item1)
+            print(file.id, file.filename)
+            print(file.filename.split())
+            extension = file.filename.split(".")[-1] or ""
+            dest_path = f"{path}{file.id}{"." + extension}"
+
+            if os.path.isfile(dest_path):
+                print("Skipping... File already exists...")
+                pass
+
+            self.files_downloaded.add(content_id)
+            file.download(dest_path)
+
+        except ResourceDoesNotExist or Unauthorized or Forbidden:
+            pass
+
+    def testing(self):
+        temp = self.canvas.get_current_user().get_profile()
+        print(temp)
+
+        courses = self.canvas.get_courses()
+        for course in courses:
+            self.download_course(course, course.id)
+            course: Course = course
+            print("COURSE: ", course, course.id)
+            for module in course.get_modules():
+                print("MODULE: ", module, module.id)
+                for item in module.get_module_items():
+                    print("ITEM: ", item, item.type, item.id)
+            # if item.type == "File":
+            # self.download_item(item.id)
+            # else:
+            #     item1 = {key: value for key, value in item.__dict__.items()}
+            #     print(item1)
+
+            # if item.type == "File":
+            #     self.download_item(item)
+
+    def extract_files(self, text) -> set:
+        text_search = re.findall("/files/(\\d+)", text, re.IGNORECASE)
+        groups = set(text_search)
+        return groups
 
 
 def main():
-    try:
-        # Initialize connection and schema
-        # conn = iris.connect()
-        # create_schema()
-
-        # Example: Add a user
-        add_user("0", "hello", "canvas_api_key_123")
-
-        # Example: Add courses for the user
-        # vector_data1 = b"..."  # Your vector data here
-        # metadata1 = '{"course_type": "Math", "difficulty": "Advanced"}'
-        # add_course("0", "Calculus 101", vector_data1, metadata1)
-
-        # Example: Retrieve user's courses
-        # courses = get_user_courses("0")
-        # print(f"Found {len(courses)} courses for user 0")
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-    # finally:
-    #     conn.close()
+    downloader = CourseDownloader()
+    downloader.download_all()
+    # downloader.testing()
+    # downloader.downloader()
 
 
 if __name__ == "__main__":

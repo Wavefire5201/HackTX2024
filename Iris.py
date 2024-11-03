@@ -2,11 +2,10 @@ import os, dotenv
 import langchain_iris
 import iris
 
-dotenv.load_dotenv()
-
 
 class Iris:
     def __init__(self, database: bool):
+        dotenv.load_dotenv()
         self.database = database
         self.username = os.getenv("IRIS_USERNAME")
         self.password = os.getenv("IRIS_PASSWORD")
