@@ -1,7 +1,15 @@
 // Create the chatbot button
 const chatbotButton = document.createElement('div');
 chatbotButton.id = 'chatbotButton';
-chatbotButton.textContent = '💬';
+chatbotButton.style.cursor = 'pointer';
+
+const chatbotIcon = document.createElement('img');
+chatbotIcon.src = chrome.runtime.getURL(chat.svg);
+chatbotIcon.alt = 'Chatbot';
+chatbotIcon.style.width = '50px';
+chatbotIcon.style.height = '50px';
+
+chatbotButton.appendChild(chatbotIcon);
 document.body.appendChild(chatbotButton);
 
 // Add styles and animation for the chatbot

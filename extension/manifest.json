@@ -1,23 +1,25 @@
 {
-    "manifest_version": 3,
-    "name": "Canvas Chatbot Extension",
-    "version": "1.0",
-    "description": "Adds a chatbot to Canvas.",
-    "permissions": ["activeTab", "scripting"],
-    "host_permissions": ["<all_urls>"],
-    "content_scripts": [
-      {
-        "matches": ["https://canvas.rice.edu/*"],
-        "js": ["content.js"]
-      }
-    ],
-    "action": {
-        "default_popup": "popup.html",
-        "default_icon": {
-            "16": "canvas.png",
-            "48": "canvas.png",
-            "128": "canvas.png"
-        }
+  "manifest_version": 3,
+  "name": "Canvi",
+  "version": "1.0",
+  "description": "Adds a chatbot to Canvas with AI integration.",
+  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://canvas.rice.edu/*",
+        "https://utexas.instructure.com/*"
+      ],
+      "js": ["content.js"]
     }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  }
 }
-  
